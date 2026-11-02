@@ -8,7 +8,7 @@ const key='english_review_v2_heigebao';
 let db;try{db=JSON.parse(localStorage.getItem(key))||{}}catch{db={}};
 db.stats=db.stats||{};db.records=db.records||[];db.version=2;
 const $=s=>document.querySelector(s), root=$('#app');
-let screen='home',game=null,dialog=null,feedbackTimer=null,currentAudio=null,audioTimer=null,filter='全部',returnView='home';
+let screen='home',game=null,dialog=null,feedbackTimer=null,currentAudio=null,audioTimer=null,filter='全部',bookSort='accuracy',bookDirection='asc',returnView='home';
 const all=[...D.words,...D.sentences];
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const rand=a=>a[Math.floor(Math.random()*a.length)];
@@ -163,10 +163,18 @@ async function choose(i){
 }
 function submit(){let q=game?.current;if(!q||!q.selected.length)return;let submitted=q.type==='reorder'?fmtTokens(q.selected.map(i=>q.options[i].text)):q.selected.map(i=>q.options[i].text).join('');q.choice=submitted;complete(q.type==='reorder'?normalizedSentence(submitted)===normalizedSentence(q.correct):submitted.toLowerCase()===q.correct.toLowerCase())}
 function complete(ok){let q=game.current;q.stage='feedback';q.ok=ok;q.earned=ok?(q.type==='listen'&&q.step===2?3:points[q.type]):0;game.score+=q.earned;game.completed++;game.results.push({type:q.type,itemId:q.itemId,correct:q.correct,chosen:q.choice,ok,earned:q.earned,question:q.question||q.zh||'',zh:q.zh});updateStats(q,ok);if(game.mode==='infinite'){game.recentKeys[q.type+':'+q.itemId]=game.completed;}storeGame();feedback(q)}
+// 自然發音干擾詞未必收錄於教材，額外提供對照用中文，不納入正式題庫統計。
+const phonicsGloss={and:'和',bat:'球棒',log:'原木',edge:'邊緣',dish:'盤子',curl:'捲曲',wet:'濕的',kit:'工具組',rose:'玫瑰',box:'盒子',big:'大的',habit:'習慣',sit:'坐',pen:'筆',cup:'杯子',best:'最好的',widow:'寡婦'};
+function phonicsChinese(word){return D.words.find(w=>w.en.toLowerCase()===word.toLowerCase())?.zh||phonicsGloss[word.toLowerCase()]||'中文待補';}
+function phonicsCompare(q){
+ const opts=q.options||[q.correct,q.other];
+ return `<div class="phonics-compare">${opts.map(word=>`<div class="phonics-card ${word===q.correct?'phonics-right':'phonics-other'}"><div class="phonics-label">${word===q.correct?'✓ 正確答案':'對照單字'}</div><div class="phonics-word">${escape(word)}</div><div class="phonics-zh">${escape(phonicsChinese(word))}</div><button type="button" class="ghost phonics-play" data-play="${escape(word)}" aria-label="播放 ${escape(word)} 發音">🔊 聽發音</button></div>`).join('')}</div>`;
+}
 async function feedback(q){
  voiceStop();clearTimeout(feedbackTimer);let detail='';
  let original=D.words.find(x=>x.id===q.itemId)||D.sentences.find(x=>x.id===q.itemId);
- if(q.type==='spell'||q.type==='reorder'){
+ if(q.type==='phonics'){detail=phonicsCompare(q);}
+ else if(q.type==='spell'||q.type==='reorder'){
   let intended=q.correct,got=q.choice||'';let wrong=[...got].map((c,i)=>c===intended[i]?escape(c):`<span class="markbad">${escape(c)}</span>`).join('');
   detail=`<div>你的答案：${wrong||'（未填寫）'}</div><div>正確答案：<strong>${escape(intended)}</strong></div>`;
  }else detail=`<div style="font-size:27px;font-weight:850">${escape(q.correct)}</div>`;
@@ -174,7 +182,7 @@ async function feedback(q){
  if(original?.zh)detail+=`<div>${escape(original.zh)}</div>`;
  let showPlus=game.mode==='infinite'&&q.earned?`<h2 class="green">+${q.earned} 分</h2>`:'';
  const progress=game.mode==='exam'?`第 ${game.position+1} / ${game.order.length} 題`:`第 ${game.completed} 題`;
- shell(`<div class="stats"><span class="pill">${game.mode==='exam'?'考試中':'目前 '+game.score+' 分'}</span><span class="pill">${progress}</span><button class="danger" data-action="quit">${game.mode==='exam'?'結束考試':'結束挑戰'}</button></div>${game.mode==='exam'?`<div class="progress"><span style="width:${(game.position+1)/game.order.length*100}%"></span></div>`:''}<div class="card"><div class="feedback ${q.ok?'ok':'no'}"><div class="feedback-title ${q.ok?'green':'red'}">${q.ok?'✓ 答對了！':'✗ 答錯了'}</div>${showPlus}${q.type==='qa'?`<div class="muted">題目：${escape(q.question)}</div>`:''}${detail}<div class="actions"><button class="ghost" data-action="replay-feedback">🔊 再聽一次</button><button data-action="next-feedback">下一題 →</button></div></div></div>`);
+ shell(`<div class="stats"><span class="pill">${game.mode==='exam'?'考試中':'目前 '+game.score+' 分'}</span><span class="pill">${progress}</span><button class="danger" data-action="quit">${game.mode==='exam'?'結束考試':'結束挑戰'}</button></div>${game.mode==='exam'?`<div class="progress"><span style="width:${(game.position+1)/game.order.length*100}%"></span></div>`:''}<div class="card"><div class="feedback ${q.ok?'ok':'no'}"><div class="feedback-title ${q.ok?'green':'red'}">${q.ok?'✓ 答對了！':'✗ 答錯了'}</div>${showPlus}${q.type==='qa'?`<div class="muted">題目：${escape(q.question)}</div>`:''}${detail}<div class="actions">${q.type==='phonics'?'':'<button class="ghost" data-action="replay-feedback">🔊 再聽一次</button>'}<button data-action="next-feedback">下一題 →</button></div></div></div>`);
  await replayFeedback(q);
 }
 async function replayFeedback(q){
@@ -197,9 +205,56 @@ function renderExamResult(r){screen='examResult';let rows=TYPES.map(t=>{let all=
 function askQuit(){dialog='quit';const isExam=game.mode==='exam';root.insertAdjacentHTML('beforeend',`<div class="dialogmask"><div class="dialog"><h2>確定要結束${isExam?'考試':'挑戰'}嗎？</h2><p>目前累積分數</p><div class="result">${game.score} ${isExam?'/ 100':'分'}</div><p class="muted">已完成 ${game.completed} ${isExam?'/ 23 ':''}題。尚未完成的題目不計分、不計入答題次數或正確率。</p><div class="actions"><button class="ghost" data-action="cancelQuit">繼續${isExam?'考試':'挑戰'}</button><button data-action="confirmQuit">確認結束</button></div></div></div>`)}
 function endInfinite(){voiceStop();clearTimeout(feedbackTimer);let r={score:game.score,start:new Date(game.start).toISOString(),duration:Date.now()-game.start,completed:game.completed,correct:game.results.filter(x=>x.ok).length};dialog=null;game=null;screen='enterName';shell(`<div class="card question"><h2>🏆 挑戰結束</h2><div class="result">${r.score} 分</div><p>完成 ${r.completed} 題 · 答對 ${r.correct} 題<br>挑戰時間 ${duration(r.duration)}</p><label for="player">挑戰者名字</label><div style="margin:15px"><input id="player" maxlength="20" placeholder="輸入名字" value="小勇士"></div><button id="saveRecord">儲存挑戰紀錄</button></div>`);$('#saveRecord').onclick=()=>{let name=$('#player').value.trim()||'小勇士';db.records.push({...r,name});db.records.sort((a,b)=>b.score-a.score||a.duration-b.duration||new Date(a.start)-new Date(b.start));db.records=db.records.slice(0,5);save();ranking()}}
 function ranking(){screen='ranking';let entries=db.records.map((r,i)=>`<tr><td>${i+1}</td><td>${escape(r.name)}</td><td><b>${r.score} 分</b></td><td>${duration(r.duration)}</td><td>${shortDate(r.start)}</td></tr>`).join('');shell(`<div class="card ranking-board"><h2>🏆 歷史高分排行榜</h2><p class="sub">僅保留歷史最高分的 5 次挑戰；同分時由完成時間較短者優先。</p><div class="scroll"><table class="table"><thead><tr><th>名次</th><th>名字</th><th>分數</th><th>持續時間</th><th>開始日期</th></tr></thead><tbody>${entries||'<tr><td colspan="5">尚無挑戰紀錄</td></tr>'}</tbody></table></div><button class="ghost" data-nav="home">回首頁</button></div>`)}
-function book(){screen='book';let topics=['全部',...D.sections.map(s=>s.章節)];let list=all.filter(x=>filter==='全部'||x.sections?.includes(filter));let unfinished=all.filter(x=>!stats(x.id).total).length;
- shell(`<div class="card"><div class="stats"><h2>📖 題庫寶典</h2><button class="ghost" data-nav="home">回首頁</button></div><p class="sub">${D.words.length} 個單字 · ${D.sentences.length} 個句型 · ${unfinished} 個項目未作答</p><div class="filter">${topics.map((t,i)=>`<button class="${filter===t?'primary':'ghost'}" data-filter="${i}">${escape(t)}</button>`).join('')}</div>${list.map(x=>{let p=accuracy(x.id),s=stats(x.id);return `<div class="list-row"><div><div style="font-size:18px;font-weight:800">${escape(x.visual||'')} ${escape(x.en)}</div><div class="muted">${escape(x.zh)}　<span class="tag">${escape(x.topic)}</span> <span class="tag">${x.id.startsWith('w')?'單字':'句型'}</span></div><div class="tiny muted">已作答 ${s.total} 次</div></div><div style="display:flex;align-items:center;gap:10px"><b class="${p===null?'muted':p===100?'markgood':'markbad'}">${p===null?'-':p+'%'}</b><button class="ghost" data-play="${escape(x.en)}">🔊</button></div></div>`}).join('')}</div><div class="card"><h2>🧩 題庫檢查</h2><p class="muted">正式教材已匯入。音檔目前採線上字典與瀏覽器語音後備，尚未完成逐筆人工發音驗證。多個英文姓名或替代句型的原始合併條目保留供查閱，但不直接用於拼字及聽力測驗。</p><div class="notice">⚠️ 尚待人工確認：音檔正確性及使用授權；自然發音配對中的課外干擾詞僅為練習選項。題庫內合併條目不會直接參與不適合的題型；中文翻譯無法唯一指定答案且未建立情境的單字會略過拼字題。</div></div><div class="card"><h2>💾 學習紀錄備份</h2><div class="actions"><button data-action="export">匯出 JSON 備份</button><button class="ghost" data-action="import">匯入 JSON 備份</button><input type="file" id="importFile" accept="application/json,.json" hidden></div><p class="sub">匯入會取代目前的學習紀錄及排行榜；教材資料不會被修改。</p></div>`);
- root.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=topics[+b.dataset.filter];book()});}
+const BOOK_CATEGORIES=['全部','課堂用語','數字','單字','句型','自然發音','節日'];
+const chapterRank=Object.fromEntries(D.sections.map((section,index)=>[section.章節,index]));
+function bookCategory(item){
+ const sec=item.sections||[];
+ if(sec.some(x=>/Christmas|耶誕|聖誕|節日/i.test(x)))return '節日';
+ if(sec.some(x=>/Classroom English|課堂用語/i.test(x)))return '課堂用語';
+ if(sec.some(x=>/^Numbers$|^數字/.test(x)) && !sec.some(x=>/^L[1-4]/.test(x)))return '數字';
+ if(item.id.startsWith('s'))return '句型';
+ if(sec.some(x=>/^L[1-4]\b/.test(x)))return '單字';
+ if(sec.some(x=>/^Phonics\s*\d+/i.test(x)))return '自然發音';
+ return item.id.startsWith('w')?'單字':'句型';
+}
+function itemLessons(item){
+ const labels=new Set();
+ for(const sec of item.sections||[]){
+  for(const match of sec.matchAll(/L([1-4])/g))labels.add(Number(match[1]));
+ }
+ return [...labels].sort((a,b)=>a-b).map(n=>'L'+n);
+}
+function book(){
+ screen='book';
+ const unfinished=all.filter(x=>!stats(x.id).total).length;
+ let list=all.filter(x=>filter==='全部'||bookCategory(x)===filter);
+ const rank=x=>Math.min(...(x.sections||[]).map(s=>chapterRank[s]??999),999);
+ list.sort((a,b)=>{
+  const direction=bookDirection==='asc'?1:-1;
+  if(bookSort==='accuracy'){
+   const pa=accuracy(a.id),pb=accuracy(b.id);
+   if(pa===null&&pb!==null)return 1;
+   if(pb===null&&pa!==null)return -1;
+   if(pa!==null&&pb!==null&&pa!==pb)return (pa-pb)*direction;
+  }else if(bookSort==='count'){
+   const d=stats(a.id).total-stats(b.id).total;if(d)return d*direction;
+  }else if(bookSort==='unit'){
+   const d=rank(a)-rank(b);if(d)return d*direction;
+  }
+  return rank(a)-rank(b)||a.en.localeCompare(b.en,'en');
+ });
+ const opts=(values,chosen)=>values.map(([v,label])=>`<option value="${escape(v)}" ${chosen===v?'selected':''}>${escape(label)}</option>`).join('');
+ shell(`<div class="card"><div class="stats"><h2>📖 題庫寶典</h2><button class="ghost" data-nav="home">回首頁</button></div><p class="sub">${D.words.length} 個單字 · ${D.sentences.length} 個句型 · ${unfinished} 個項目未作答</p>
+ <div class="filter book-filter">${BOOK_CATEGORIES.map((t,i)=>`<button class="${filter===t?'primary':'ghost'}" data-filter="${i}">${escape(t)}</button>`).join('')}</div>
+ <div class="book-controls"><label>排序依據<select id="bookSort">${opts([['accuracy','正確率'],['count','作答次數'],['unit','單元']],bookSort)}</select></label><label>排序方向<select id="bookDirection">${opts([['asc','正序 ↑'],['desc','倒序 ↓']],bookDirection)}</select></label></div>
+ <p class="sub">目前顯示 ${list.length} 個項目</p>
+ ${list.map(x=>{let p=accuracy(x.id),s=stats(x.id),lessons=itemLessons(x);return `<div class="list-row"><div><div style="font-size:18px;font-weight:800">${escape(x.visual||'')} ${escape(x.en)}</div><div class="muted">${escape(x.zh)}　<span class="tag">${escape(bookCategory(x))}</span> <span class="tag">${x.id.startsWith('w')?'單字':'句型'}</span>${lessons.map(t=>` <span class="tag lesson-tag">${escape(t)}</span>`).join('')}</div><div class="tiny muted">已作答 ${s.total} 次</div></div><div style="display:flex;align-items:center;gap:10px"><b class="${p===null?'muted':p===100?'markgood':'markbad'}">${p===null?'-':p+'%'}</b><button class="ghost" data-play="${escape(x.en)}">🔊</button></div></div>`}).join('')}</div>
+ <div class="card"><h2>🧩 題庫檢查</h2><p class="muted">正式教材已匯入。音檔目前採線上字典與瀏覽器語音後備，尚未完成逐筆人工發音驗證。多個英文姓名或替代句型的原始合併條目保留供查閱，但不直接用於拼字及聽力測驗。</p><div class="notice">⚠️ 尚待人工確認：音檔正確性及使用授權；自然發音配對中的課外干擾詞僅為練習選項。題庫內合併條目不會直接參與不適合的題型；中文翻譯無法唯一指定答案且未建立情境的單字會略過拼字題。</div></div><div class="card"><h2>💾 學習紀錄備份</h2><div class="actions"><button data-action="export">匯出 JSON 備份</button><button class="ghost" data-action="import">匯入 JSON 備份</button><input type="file" id="importFile" accept="application/json,.json" hidden></div><p class="sub">匯入會取代目前的學習紀錄及排行榜；教材資料不會被修改。</p></div>`);
+ root.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=BOOK_CATEGORIES[+b.dataset.filter];book()});
+ $('#bookSort').onchange=e=>{bookSort=e.target.value;book()};
+ $('#bookDirection').onchange=e=>{bookDirection=e.target.value;book()};
+}
+
 function exportBackup(){let blob=new Blob([JSON.stringify({version:2,exportedAt:new Date().toISOString(),stats:db.stats,records:db.records},null,2)],{type:'application/json'});let url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='英文複習遊戲-紀錄-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),500)}
 async function importBackup(file){try{let obj=JSON.parse(await file.text());if(!obj||typeof obj.stats!=='object'||!Array.isArray(obj.records)||Array.isArray(obj.stats))throw Error('格式不正確');if(!confirm('確定要使用備份取代目前的學習紀錄與排行榜嗎？'))return;db.stats=obj.stats;db.records=obj.records.slice(0,5);save();alert('匯入完成');book()}catch(e){alert('無法匯入：'+e.message)}}
 root.addEventListener('click',e=>{let el=e.target.closest('[data-nav],[data-choose],[data-token],[data-action],[data-play]');if(!el)return;if(el.dataset.nav){let nav=el.dataset.nav;if(game?.mode==='exam'&&nav!=='exam')return;if(nav==='home')home();if(nav==='exam')start('exam');if(nav==='infinite')start('infinite');if(nav==='book')book();if(nav==='ranking')ranking();return}

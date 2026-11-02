@@ -5,3 +5,16 @@
 .ranking-board .table th,.ranking-board .table td{text-align:center;vertical-align:middle}
 .ranking-board .table{min-width:420px}
 .ranking-board .scroll{max-width:100%}
+
+.book-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0 16px}.book-controls label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#56719a;font-weight:800}.book-controls select{background:#f0f5fd;border:1px solid #cedcf0;border-radius:12px;padding:11px 9px;min-height:45px;color:#285080;font:inherit;width:100%;max-width:100%}.book-filter button{white-space:nowrap}.lesson-tag{background:#e5efff;color:#2c66a8}@media(max-width:380px){.book-controls{gap:6px}.book-controls select{padding:9px 5px}}
+
+/* 自然發音題：答題回饋左右並排、兩個單字可分別重播 */
+.phonics-compare{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:18px 0 8px;text-align:center}
+.phonics-card{min-width:0;background:#fff;border:2px solid #d5e2f5;border-radius:17px;padding:16px 9px;display:flex;align-items:center;flex-direction:column;gap:9px}
+.phonics-right{border-color:#6dbb92;background:#f4fff9}
+.phonics-label{font-size:13px;color:#5f7492;font-weight:800}
+.phonics-right .phonics-label{color:#188052}
+.phonics-word{font-size:clamp(22px,5vw,30px);font-weight:900;overflow-wrap:anywhere;color:#27354d}
+.phonics-zh{font-size:16px;color:#5b6980;min-height:24px}
+.phonics-play{padding:11px 10px;min-height:45px;width:100%;font-size:14px}
+@media(max-width:380px){.phonics-compare{gap:8px}.phonics-card{padding:12px 6px}.phonics-play{font-size:13px;padding:9px 5px}}
