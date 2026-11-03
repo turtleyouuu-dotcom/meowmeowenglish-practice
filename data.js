@@ -1,5 +1,6 @@
 /* 正式匯入教材；題目於遊戲時隨機組合。 */
 window.LESSON_DATA={
+  examRanges:[{id:'g3_exam1',name:'三年級第一次段考'}],
   "title": "海格堡三年級英文單字表（一）（二）",
   "sections": [
     {

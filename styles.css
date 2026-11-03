@@ -18,3 +18,6 @@
 .phonics-zh{font-size:16px;color:#5b6980;min-height:24px}
 .phonics-play{padding:11px 10px;min-height:45px;width:100%;font-size:14px}
 @media(max-width:380px){.phonics-compare{gap:8px}.phonics-card{padding:12px 6px}.phonics-play{font-size:13px;padding:9px 5px}}
+
+/* 2026-11-03 settings and spelling */
+.setup-option{display:flex;align-items:center;gap:12px;padding:12px 10px;background:#f2f7ff;border-radius:13px;margin:8px 0;font-weight:750}.setup-option input{width:21px;height:21px;flex-shrink:0}.setup-groups{margin:20px 0}.setup-option input[type=radio],.setup-option input[type=checkbox]{accent-color:#387bdf}.audio-actions{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px;margin:24px 0}.audio-actions .audio{padding:15px 20px;font-size:17px}.spelling-slots{display:flex;justify-content:center;flex-wrap:wrap;gap:5px;margin:18px 0}.spell-slot{background:#f3f7ff;border:2px solid #bed1ee;border-radius:10px;width:clamp(32px,9vw,52px);height:56px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:850}.spell-slot.hinted{background:#e3f9ed;border-color:#35ac74;color:#158053}.hint-button{margin:0 auto 12px}
