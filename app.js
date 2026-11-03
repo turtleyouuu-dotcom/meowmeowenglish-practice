@@ -32,12 +32,21 @@ function updateStats(q,ok){let s=stats(q.itemId);s.total++;if(ok)s.correct++;s.r
 // 音檔在顯示題目時預先查詢並預載；播放時不再臨時等待字典查詢。
 let voiceSeq=0, currentFinish=null;
 const audioCache=new Map(), audioPromises=new Map(), audioElements=new Map();
+// 固定美式 /aɪ/ 錄音：Wikimedia Commons, En-us-I.ogg, public domain.
+// 網路無法取得時，以同音字 eye 交給 en-US 語音引擎唸讀。
+const FIXED_I_AUDIO='https://upload.wikimedia.org/wikipedia/commons/9/9f/En-us-I.ogg';
+const ISOLATED_PRONOUN_I=/^i$/i;
 const automaticQuestionAudio=new WeakSet();
 function voiceStop(){voiceSeq++;if(currentAudio){currentAudio.pause();currentAudio.currentTime=0;currentAudio=null}if(window.speechSynthesis)window.speechSynthesis.cancel();if(audioTimer){clearTimeout(audioTimer);audioTimer=null}if(currentFinish){const done=currentFinish;currentFinish=null;done()}}
 function primeSpeech(){if(!('speechSynthesis' in window))return;window.speechSynthesis.getVoices();}
 function getDictionaryAudio(text){
  const word=String(text).trim();if(!/^[a-z]+$/i.test(word))return Promise.resolve(null);
  const id=word.toLowerCase();if(audioPromises.has(id))return audioPromises.get(id);
+ if(ISOLATED_PRONOUN_I.test(word)){
+  audioCache.set(id,FIXED_I_AUDIO);
+  const audio=new Audio();audio.preload='auto';audio.src=FIXED_I_AUDIO;audio.load();audioElements.set(id,audio);
+  audioPromises.set(id,Promise.resolve(FIXED_I_AUDIO));return audioPromises.get(id);
+ }
  const promise=(async()=>{let timer;try{
   const ctl=new AbortController();timer=setTimeout(()=>ctl.abort(),2400);
   const res=await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(id),{signal:ctl.signal});
@@ -60,7 +69,7 @@ function prefetchQuestion(q){
 }
 function speakFallback(text,finish){
  if(!('speechSynthesis' in window)){finish();return}
- let u=new SpeechSynthesisUtterance(text);u.lang='en-US';u.rate=1;
+ let u=new SpeechSynthesisUtterance(ISOLATED_PRONOUN_I.test(String(text).trim())?'eye':text);u.lang='en-US';u.rate=1;
  let voices=speechSynthesis.getVoices();u.voice=voices.find(v=>v.lang.toLowerCase()==='en-us')||null;
  u.onend=finish;u.onerror=finish;speechSynthesis.speak(u);
  audioTimer=setTimeout(finish,12000);
@@ -118,11 +127,28 @@ const qaDistractors={
  'Can you help me?':["I'm nine years old.","You're welcome."]
 };
 function validQaPairs(){const allowed=new Set(D.sentences.map(x=>x.en));return D.qa.filter(([question,answer])=>qaDistractors[question]?.length===2&&allowed.has(answer)&&qaDistractors[question].every(x=>allowed.has(x)&&x!==answer));}
+function exposesAnswerByLatinText(item){
+ // 例如「Alan」「Emma」「OK」等已顯示的英文，不能成為唯一辨認選項的線索。
+ return /[A-Za-z]/.test(String(item.zh||''));
+}
+function translationDistractors(item){
+ const normalized=s=>String(s||'').toLowerCase().replace(/[.,!?]/g,'').replace(/\s+/g,' ').trim();
+ const target=normalized(item.en),words=target.split(' '),first=words[0]||'';
+ const question=/\?\s*$/.test(item.en);
+ const candidates=pools('translate').filter(x=>x.id!==item.id&&normalized(x.en)!==target&&normalized(x.zh)!==normalized(item.zh));
+ const score=c=>{
+  const w=normalized(c.en).split(' '),sameStart=w[0]===first?6:0;
+  const sameQuestion=/\?\s*$/.test(c.en)===question?5:0;
+  const overlap=w.filter(t=>words.includes(t)).length;
+  return sameQuestion+sameStart+Math.min(overlap,2)*2-Math.abs(w.length-words.length)*1.5-Math.abs(c.en.length-item.en.length)*0.08;
+ };
+ return [...candidates].sort((a,b)=>score(b)-score(a)).slice(0,2).map(x=>x.en);
+}
 function pools(type){
  const words=D.words.filter(w=>!w.displayOnly&&withinRange(w));const sentences=D.sentences.filter(w=>!w.displayOnly&&withinRange(w));
  if(type==='listen')return words;
  if(type==='spell')return words.filter(w=>/^[A-Za-z]+$/.test(w.en)&&spellingContext(w)!==null);
- if(type==='translate')return sentences.filter(s=>!/\b(?:Alan|Mike|Owen|Ken)\b/i.test(s.en));
+ if(type==='translate')return sentences.filter(s=>!exposesAnswerByLatinText(s));
  if(type==='reorder')return sentences;
  if(type==='qa')return validQaPairs().map(([question,answer],i)=>({id:'qa_'+i,en:question,answer,question,topic:'問答',itemId:D.sentences.find(s=>s.en===question)?.id})).filter(x=>withinRange(rangeOf(x.itemId)));
  if(type==='phonics')return D.phonics.filter(([word])=>words.some(w=>w.en===word)).map(([word,other],i)=>({id:'p_'+i,en:word,other,itemId:words.find(w=>w.en===word)?.id,topic:'自然發音'}));return[];
@@ -130,7 +156,7 @@ function pools(type){
 function idFor(t,item){return item.itemId||item.id}
 function buildQuestion(type,item){let itemId=idFor(type,item),q={type,itemId,correct:item.en,zh:item.zh||'',visual:item.visual||'',topic:item.topic||'',tried:0,choice:null,selected:[],stage:'question',step:1};
  if(type==='listen'){let alternatives=shuffle(pools('listen').filter(w=>w.en!==item.en)).slice(0,2).map(x=>x.en);q.options=shuffle([item.en,...alternatives]);}
- if(type==='translate'){q.options=shuffle([item.en,...shuffle(pools(type).filter(x=>x.en!==item.en&&x.zh!==item.zh&&!/\b(?:Alan|Mike|Owen|Ken)\b/i.test(x.en))).slice(0,2).map(x=>x.en)]);}
+ if(type==='translate'){q.options=shuffle([item.en,...translationDistractors(item)]);}
  if(type==='qa'){q.correct=item.answer;q.question=item.question;q.options=shuffle([item.answer,...qaDistractors[item.question]]);}
  if(type==='phonics'){q.options=shuffle([item.en,item.other]);}
  if(type==='reorder'){q.tokens=item.en.match(/[A-Za-z]+(?:'[A-Za-z]+)?|[?.!,]/g)||[];q.options=shuffle(q.tokens.map((t,i)=>({text:t,id:i})));}
@@ -198,12 +224,13 @@ function normalizedSentence(s){return String(s).toLowerCase().replace(/[.,!?]/g,
 function renderGame(){if(!game)return home();screen='game';let q=game.current;if(!q)return;let isExam=game.mode==='exam';let html=`<div class="stats"><span class="pill">${isExam?'📝 考試模式':'🚀 無限模式'}</span><span class="pill">${isExam?`第 ${game.position+1} / ${game.order.length} 題`:`⭐ ${game.score} 分`}</span><button class="danger" data-action="quit">${isExam?'結束考試':'結束挑戰'}</button></div>${isExam?`<div class="progress"><span style="width:${game.position/game.order.length*100}%"></span></div>`:''}<div class="card question"><div class="pill" style="display:inline-block;margin-bottom:16px">${names[q.type]}</div>`;
  let prompt={listen:'聽一聽，選出正確的英文單字',translate:'他的英文是什麼？',qa:'這個問題該怎麼回答？',spell:'請拼出正確的英文單字',reorder:'請排列出正確的英文句子',phonics:'仔細聽，選出正確單字'}[q.type];
  html+=`<div class="prompt">${prompt}</div>`;
- if(q.type==='listen'||q.type==='phonics'||q.type==='qa'||q.type==='spell')html+=`<div class="audio-actions"><button class="audio" data-action="audio">🔊 正常發音</button></div>`;
+ if(q.type==='listen'||q.type==='phonics'||q.type==='qa'||q.type==='spell')html+=`<div class="audio-actions"><button class="audio" data-action="audio">${q.type==='spell'&&q.spellingPrompt?.context?'🔊 朗讀題目':'🔊 正常發音'}</button></div>`;
  if(q.type==='translate'||q.type==='reorder')html+=`<div class="target">${escape(q.zh||D.words.find(x=>x.id===q.itemId)?.zh||D.sentences.find(x=>x.id===q.itemId)?.zh)}</div>`;
  if(q.type==='spell'){const sp=q.spellingPrompt||{};html+=sp.context?`<div class="target">${escape(sp.context)}</div><div class="sub">${escape(sp.translation)}</div>`:`<div class="target">${escape(sp.translation||q.zh)}</div>`;}
  if(q.type==='listen'&&q.step===2)html+=`<div class="hint">💡 中文提示：<strong>${escape(q.zh||D.words.find(x=>x.id===q.itemId)?.zh||"再聽一次發音")}</strong>，請再試一次。</div>`;
  if(['listen','translate','qa','phonics'].includes(q.type))html+=`<div class="choices ${q.type==='phonics'?'two':''}">${q.options.map((v,i)=>`<button class="choice" data-choose="${i}">${escape(v)}</button>`).join('')}</div>`;
- else html+=q.type==='spell'?`<div class="sub" style="margin-top:10px">共有 ${q.correct.length} 個字母</div><div class="spelling-slots">${Array.from({length:q.correct.length},(_,i)=>{const c=q.selected[i]===undefined?'':q.options[q.selected[i]].text;return `<span class="spell-slot ${q.hinted?.includes(i)?'hinted':''}">${escape(c||'＿')}</span>`}).join('')}</div><button class="ghost hint-button" data-action="spell-hint" ${q.hintUsed||q.selected.length===q.correct.length&&q.selected.map(i=>q.options[i].text).join('')===q.correct.toLowerCase()?'disabled':''}>💡 ${q.hintUsed?'提示已使用':'使用提示（1 次）'}</button>`:`<div class="answerbox">${q.selected.length?escape(fmtTokens(q.selected.map(i=>q.options[i].text))):'<span class="muted">點擊下方單字，組成答案</span>'}</div>`;html+=`<div class="wordbank">${q.options.map((v,i)=>`<button class="token" data-token="${i}" ${q.type==='reorder'&&q.selected.includes(i)?'disabled':''}>${escape(v.text)}</button>`).join('')}</div><div class="actions"><button class="ghost" data-action="undo" ${q.selected.length?'':'disabled'}>↩ 上一步</button><button class="ghost" data-action="clear" ${q.selected.length?'':'disabled'}>清除重排</button><button data-action="submit" ${q.selected.length?'':'disabled'}>確認答案</button></div>`;
+ else {html+=q.type==='spell'?`<div class="sub" style="margin-top:10px">共有 ${q.correct.length} 個字母</div><div class="spelling-slots">${Array.from({length:q.correct.length},(_,i)=>{const c=q.selected[i]===undefined?'':q.options[q.selected[i]].text;return `<span class="spell-slot ${q.hinted?.includes(i)?'hinted':''}">${escape(c||'＿')}</span>`}).join('')}</div><button class="ghost hint-button" data-action="spell-hint" ${q.hintUsed||q.selected.length===q.correct.length&&q.selected.map(i=>q.options[i].text).join('')===q.correct.toLowerCase()?'disabled':''}>💡 ${q.hintUsed?'提示已使用':'使用提示（1 次）'}</button>`:`<div class="answerbox">${q.selected.length?escape(fmtTokens(q.selected.map(i=>q.options[i].text))):'<span class="muted">點擊下方單字，組成答案</span>'}</div>`;html+=`<div class="wordbank">${q.options.map((v,i)=>`<button class="token" data-token="${i}" ${q.type==='reorder'&&q.selected.includes(i)?'disabled':''}>${escape(v.text)}</button>`).join('')}</div><div class="actions"><button class="ghost" data-action="undo" ${q.selected.length?'':'disabled'}>↩ 上一步</button><button class="ghost" data-action="clear" ${q.selected.length?'':'disabled'}>清除重排</button><button data-action="submit" ${q.selected.length?'':'disabled'}>確認答案</button></div>`;
+ }
  html+=`</div>`;shell(html);prefetchQuestion(q);if(q.stage==='question'&&['listen','qa','phonics'].includes(q.type)&&!automaticQuestionAudio.has(q)){automaticQuestionAudio.add(q);q.audioStarted=true;playVoice(q.type==='qa'?q.question:q.correct,true);}}
 async function choose(i){
  if(!game||!game.current)return;
@@ -236,6 +263,22 @@ function useSpellingHint(){
  if(index<q.selected.length)q.selected[index]=i;else q.selected.push(i);
  q.hintUsed=true;q.hinted=[index];storeGame();renderGame();
 }
+async function playSpellingPrompt(q){
+ if(!q||q.type!=='spell')return;
+ const context=q.spellingPrompt?.context;
+ if(!context){await playVoice(q.correct);return}
+ const pieces=context.split('___');
+ for(let i=0;i<pieces.length;i++){
+  if(game?.current!==q||q.stage!=='question')return;
+  const part=pieces[i].trim();
+  if(part)await playVoice(part,true);
+  if(i<pieces.length-1)await new Promise(resolve=>setTimeout(resolve,300));
+ }
+}
+function completedSpellingSentence(q){
+ const ctx=q?.spellingPrompt?.context;
+ return ctx?ctx.replace('___',q.correct):q.correct;
+}
 function submit(){let q=game?.current;if(!q||!q.selected.length)return;let submitted=q.type==='reorder'?fmtTokens(q.selected.map(i=>q.options[i].text)):q.selected.map(i=>q.options[i].text).join('');q.choice=submitted;complete(q.type==='reorder'?normalizedSentence(submitted)===normalizedSentence(q.correct):submitted.toLowerCase()===q.correct.toLowerCase())}
 function complete(ok){let q=game.current;q.stage='feedback';q.ok=ok;q.earned=ok?(q.type==='listen'&&q.step===2?3:points[q.type]):0;game.score+=q.earned;game.completed++;game.results.push({type:q.type,itemId:q.itemId,correct:q.correct,chosen:q.choice,ok,earned:q.earned,question:q.question||q.zh||'',zh:q.zh});updateStats(q,ok);if(game.mode==='infinite'){game.recentKeys[q.type+':'+q.itemId]=game.completed;}storeGame();feedback(q)}
 // 自然發音干擾詞未必收錄於教材，額外提供對照用中文，不納入正式題庫統計。
@@ -262,7 +305,7 @@ async function feedback(q){
 }
 async function replayFeedback(q){
  if(!game||game.current!==q||q.stage!=='feedback')return;
- const voiceList=q.type==='qa'?[q.question,q.correct]:[q.correct];
+ const voiceList=q.type==='qa'?[q.question,q.correct]:[q.type==='spell'?completedSpellingSentence(q):q.correct];
  for(const t of voiceList){if(!game||game.current!==q||q.stage!=='feedback')return;await playVoice(t,true)}
 }
 function advanceFeedback(){
@@ -334,7 +377,7 @@ function exportBackup(){let blob=new Blob([JSON.stringify({version:3,exportedAt:
 async function importBackup(file){try{let obj=JSON.parse(await file.text());if(!obj||typeof obj.stats!=='object'||!Array.isArray(obj.records)||Array.isArray(obj.stats))throw Error('格式不正確');if(!confirm('確定要使用備份取代目前的學習紀錄與排行榜嗎？'))return;db.stats=obj.stats;db.records=obj.records.slice(0,5);if(obj.settings&&Array.isArray(obj.settings.ranges)&&Array.isArray(obj.settings.groups))db.settings={...defaultSettings,...obj.settings};save();alert('匯入完成');book()}catch(e){alert('無法匯入：'+e.message)}}
 root.addEventListener('click',e=>{let el=e.target.closest('[data-nav],[data-choose],[data-token],[data-action],[data-play]');if(!el)return;if(el.dataset.nav){let nav=el.dataset.nav;if(game?.mode==='exam'&&nav!=='exam')return;if(nav==='home')home();if(nav==='exam')setup('exam');if(nav==='infinite')setup('infinite');if(nav==='book')book();if(nav==='ranking')ranking();return}
  if(el.dataset.play){playVoice(el.dataset.play);return}if(el.dataset.choose!==undefined){choose(+el.dataset.choose);return}if(el.dataset.token!==undefined){let q=game?.current,i=+el.dataset.token;if(q&&q.stage==='question'&&(q.type==='spell'&&q.selected.length<q.correct.length||q.type==='reorder'&&!q.selected.includes(i))){const t=q.options[i].text;q.selected.push(i);renderGame();if(/[A-Za-z]/.test(t))playVoice(t,true)}return}
- switch(el.dataset.action){case'replay-feedback':replayFeedback(game?.current);break;case'next-feedback':advanceFeedback();break;case'repeat-last':start(db.settings.mode);break;case'audio':playVoice(game.current.type==='qa'?game.current.question:game.current.correct);break;case'spell-hint':useSpellingHint();break;case'start-selected':startSelected();break;case'undo':{let q=game.current;const last=q.selected.length-1;q.selected.pop();if(q.type==='spell')q.hinted=(q.hinted||[]).filter(i=>i!==last);renderGame();break}case'clear':game.current.selected=[];if(game.current.type==='spell')game.current.hinted=[];renderGame();break;case'submit':submit();break;case'quit':askQuit();break;case'cancelQuit':dialog=null;$('.dialogmask')?.remove();break;case'confirmQuit':if(game?.mode==='exam'){dialog=null;finishExam(true)}else endInfinite();break;case'export':exportBackup();break;case'import':$('#importFile').click();break;}});
+ switch(el.dataset.action){case'replay-feedback':replayFeedback(game?.current);break;case'next-feedback':advanceFeedback();break;case'repeat-last':start(db.settings.mode);break;case'audio':if(game.current.type==='spell')playSpellingPrompt(game.current);else playVoice(game.current.type==='qa'?game.current.question:game.current.correct);break;case'spell-hint':useSpellingHint();break;case'start-selected':startSelected();break;case'undo':{let q=game.current;const last=q.selected.length-1;q.selected.pop();if(q.type==='spell')q.hinted=(q.hinted||[]).filter(i=>i!==last);renderGame();break}case'clear':game.current.selected=[];if(game.current.type==='spell')game.current.hinted=[];renderGame();break;case'submit':submit();break;case'quit':askQuit();break;case'cancelQuit':dialog=null;$('.dialogmask')?.remove();break;case'confirmQuit':if(game?.mode==='exam'){dialog=null;finishExam(true)}else endInfinite();break;case'export':exportBackup();break;case'import':$('#importFile').click();break;}});
 root.addEventListener('change',e=>{if(e.target.name==='examStyle'){setupStyle=e.target.value;renderSetup();return}if(e.target.dataset.group){setupGroups=e.target.checked?[...new Set([...setupGroups,e.target.dataset.group])]:setupGroups.filter(x=>x!==e.target.dataset.group);return}if(e.target.dataset.range){setupRanges=e.target.checked?[...new Set([...setupRanges,e.target.dataset.range])]:setupRanges.filter(x=>x!==e.target.dataset.range);return}if(e.target.id==='importFile'&&e.target.files[0])importBackup(e.target.files[0])});
 window.addEventListener('beforeunload',()=>{if(game?.mode==='exam')storeGame()});
 if(db.activeExam){shell(`<div class="card hero"><h1>📝 你有尚未完成的考試</h1><p>考試進度已自動保存，必須完成考試才能返回首頁。</p><button data-nav="exam">繼續考試</button></div>`)}else home();
