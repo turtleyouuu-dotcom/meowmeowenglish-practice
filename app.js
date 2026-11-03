@@ -58,14 +58,14 @@ function prefetchQuestion(q){
  for(const text of new Set(texts))if(/^[a-z]+$/i.test(text))getDictionaryAudio(text);
  // 預先初始化語音引擎，避免首按字母時才初始化。
 }
-function speakFallback(text,finish,rate=1){
+function speakFallback(text,finish){
  if(!('speechSynthesis' in window)){finish();return}
- let u=new SpeechSynthesisUtterance(text);u.lang='en-US';u.rate=rate;
+ let u=new SpeechSynthesisUtterance(text);u.lang='en-US';u.rate=1;
  let voices=speechSynthesis.getVoices();u.voice=voices.find(v=>v.lang.toLowerCase()==='en-us')||null;
  u.onend=finish;u.onerror=finish;speechSynthesis.speak(u);
  audioTimer=setTimeout(finish,12000);
 }
-async function playVoice(text,autoplay=false,rate=1){
+async function playVoice(text,autoplay=false){
  voiceStop();const seq=voiceSeq,id=String(text).trim().toLowerCase();
  // 只使用已預先取得的字典音檔；查詢尚未完成時立即使用語音後備，避免阻塞點擊。
  const file=audioCache.get(id);
@@ -76,10 +76,10 @@ async function playVoice(text,autoplay=false,rate=1){
   if(file){
    const a=audioElements.get(id)||new Audio(file);currentAudio=a;
    try{a.pause();a.currentTime=0}catch{}
-   a.playbackRate=rate;a.preservesPitch=true;a.onended=finish;a.onerror=()=>{if(seq!==voiceSeq)return finish();speakFallback(text,finish,rate)};
-   a.play().catch(()=>{if(seq!==voiceSeq)return finish();speakFallback(text,finish,rate)});
+   a.playbackRate=1;a.preservesPitch=true;a.onended=finish;a.onerror=()=>{if(seq!==voiceSeq)return finish();speakFallback(text,finish)};
+   a.play().catch(()=>{if(seq!==voiceSeq)return finish();speakFallback(text,finish)});
    audioTimer=setTimeout(finish,12000);
-  }else speakFallback(text,finish,rate);
+  }else speakFallback(text,finish);
  });
 }
 function shell(content){root.innerHTML=`<div class="shell"><header class="top"><div class="brand" data-nav="home">🌟 英文複習小勇士</div></header>${content}</div>`}
@@ -198,7 +198,7 @@ function normalizedSentence(s){return String(s).toLowerCase().replace(/[.,!?]/g,
 function renderGame(){if(!game)return home();screen='game';let q=game.current;if(!q)return;let isExam=game.mode==='exam';let html=`<div class="stats"><span class="pill">${isExam?'📝 考試模式':'🚀 無限模式'}</span><span class="pill">${isExam?`第 ${game.position+1} / ${game.order.length} 題`:`⭐ ${game.score} 分`}</span><button class="danger" data-action="quit">${isExam?'結束考試':'結束挑戰'}</button></div>${isExam?`<div class="progress"><span style="width:${game.position/game.order.length*100}%"></span></div>`:''}<div class="card question"><div class="pill" style="display:inline-block;margin-bottom:16px">${names[q.type]}</div>`;
  let prompt={listen:'聽一聽，選出正確的英文單字',translate:'他的英文是什麼？',qa:'這個問題該怎麼回答？',spell:'請拼出正確的英文單字',reorder:'請排列出正確的英文句子',phonics:'仔細聽，選出正確單字'}[q.type];
  html+=`<div class="prompt">${prompt}</div>`;
- if(q.type==='listen'||q.type==='phonics'||q.type==='qa'||q.type==='spell')html+=`<div class="audio-actions"><button class="audio" data-action="audio">🔊 正常發音</button>${q.type==='spell'||q.type==='phonics'?'<button class="ghost" data-action="slow-audio">🐢 慢速發音</button>':''}</div>`;
+ if(q.type==='listen'||q.type==='phonics'||q.type==='qa'||q.type==='spell')html+=`<div class="audio-actions"><button class="audio" data-action="audio">🔊 正常發音</button></div>`;
  if(q.type==='translate'||q.type==='reorder')html+=`<div class="target">${escape(q.zh||D.words.find(x=>x.id===q.itemId)?.zh||D.sentences.find(x=>x.id===q.itemId)?.zh)}</div>`;
  if(q.type==='spell'){const sp=q.spellingPrompt||{};html+=sp.context?`<div class="target">${escape(sp.context)}</div><div class="sub">${escape(sp.translation)}</div>`:`<div class="target">${escape(sp.translation||q.zh)}</div>`;}
  if(q.type==='listen'&&q.step===2)html+=`<div class="hint">💡 中文提示：<strong>${escape(q.zh||D.words.find(x=>x.id===q.itemId)?.zh||"再聽一次發音")}</strong>，請再試一次。</div>`;
@@ -334,7 +334,7 @@ function exportBackup(){let blob=new Blob([JSON.stringify({version:3,exportedAt:
 async function importBackup(file){try{let obj=JSON.parse(await file.text());if(!obj||typeof obj.stats!=='object'||!Array.isArray(obj.records)||Array.isArray(obj.stats))throw Error('格式不正確');if(!confirm('確定要使用備份取代目前的學習紀錄與排行榜嗎？'))return;db.stats=obj.stats;db.records=obj.records.slice(0,5);if(obj.settings&&Array.isArray(obj.settings.ranges)&&Array.isArray(obj.settings.groups))db.settings={...defaultSettings,...obj.settings};save();alert('匯入完成');book()}catch(e){alert('無法匯入：'+e.message)}}
 root.addEventListener('click',e=>{let el=e.target.closest('[data-nav],[data-choose],[data-token],[data-action],[data-play]');if(!el)return;if(el.dataset.nav){let nav=el.dataset.nav;if(game?.mode==='exam'&&nav!=='exam')return;if(nav==='home')home();if(nav==='exam')setup('exam');if(nav==='infinite')setup('infinite');if(nav==='book')book();if(nav==='ranking')ranking();return}
  if(el.dataset.play){playVoice(el.dataset.play);return}if(el.dataset.choose!==undefined){choose(+el.dataset.choose);return}if(el.dataset.token!==undefined){let q=game?.current,i=+el.dataset.token;if(q&&q.stage==='question'&&(q.type==='spell'&&q.selected.length<q.correct.length||q.type==='reorder'&&!q.selected.includes(i))){const t=q.options[i].text;q.selected.push(i);renderGame();if(/[A-Za-z]/.test(t))playVoice(t,true)}return}
- switch(el.dataset.action){case'replay-feedback':replayFeedback(game?.current);break;case'next-feedback':advanceFeedback();break;case'repeat-last':start(db.settings.mode);break;case'audio':playVoice(game.current.type==='qa'?game.current.question:game.current.correct);break;case'slow-audio':playVoice(game.current.correct,false,.8);break;case'spell-hint':useSpellingHint();break;case'start-selected':startSelected();break;case'undo':{let q=game.current;const last=q.selected.length-1;q.selected.pop();if(q.type==='spell')q.hinted=(q.hinted||[]).filter(i=>i!==last);renderGame();break}case'clear':game.current.selected=[];if(game.current.type==='spell')game.current.hinted=[];renderGame();break;case'submit':submit();break;case'quit':askQuit();break;case'cancelQuit':dialog=null;$('.dialogmask')?.remove();break;case'confirmQuit':if(game?.mode==='exam'){dialog=null;finishExam(true)}else endInfinite();break;case'export':exportBackup();break;case'import':$('#importFile').click();break;}});
+ switch(el.dataset.action){case'replay-feedback':replayFeedback(game?.current);break;case'next-feedback':advanceFeedback();break;case'repeat-last':start(db.settings.mode);break;case'audio':playVoice(game.current.type==='qa'?game.current.question:game.current.correct);break;case'spell-hint':useSpellingHint();break;case'start-selected':startSelected();break;case'undo':{let q=game.current;const last=q.selected.length-1;q.selected.pop();if(q.type==='spell')q.hinted=(q.hinted||[]).filter(i=>i!==last);renderGame();break}case'clear':game.current.selected=[];if(game.current.type==='spell')game.current.hinted=[];renderGame();break;case'submit':submit();break;case'quit':askQuit();break;case'cancelQuit':dialog=null;$('.dialogmask')?.remove();break;case'confirmQuit':if(game?.mode==='exam'){dialog=null;finishExam(true)}else endInfinite();break;case'export':exportBackup();break;case'import':$('#importFile').click();break;}});
 root.addEventListener('change',e=>{if(e.target.name==='examStyle'){setupStyle=e.target.value;renderSetup();return}if(e.target.dataset.group){setupGroups=e.target.checked?[...new Set([...setupGroups,e.target.dataset.group])]:setupGroups.filter(x=>x!==e.target.dataset.group);return}if(e.target.dataset.range){setupRanges=e.target.checked?[...new Set([...setupRanges,e.target.dataset.range])]:setupRanges.filter(x=>x!==e.target.dataset.range);return}if(e.target.id==='importFile'&&e.target.files[0])importBackup(e.target.files[0])});
 window.addEventListener('beforeunload',()=>{if(game?.mode==='exam')storeGame()});
 if(db.activeExam){shell(`<div class="card hero"><h1>📝 你有尚未完成的考試</h1><p>考試進度已自動保存，必須完成考試才能返回首頁。</p><button data-nav="exam">繼續考試</button></div>`)}else home();
