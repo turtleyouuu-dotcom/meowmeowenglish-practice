@@ -32,21 +32,12 @@ function updateStats(q,ok){let s=stats(q.itemId);s.total++;if(ok)s.correct++;s.r
 // 音檔在顯示題目時預先查詢並預載；播放時不再臨時等待字典查詢。
 let voiceSeq=0, currentFinish=null;
 const audioCache=new Map(), audioPromises=new Map(), audioElements=new Map();
-// 固定美式 /aɪ/ 錄音：Wikimedia Commons, En-us-I.ogg, public domain.
-// 網路無法取得時，以同音字 eye 交給 en-US 語音引擎唸讀。
-const FIXED_I_AUDIO='https://upload.wikimedia.org/wikipedia/commons/9/9f/En-us-I.ogg';
-const ISOLATED_PRONOUN_I=/^i$/i;
 const automaticQuestionAudio=new WeakSet();
 function voiceStop(){voiceSeq++;if(currentAudio){currentAudio.pause();currentAudio.currentTime=0;currentAudio=null}if(window.speechSynthesis)window.speechSynthesis.cancel();if(audioTimer){clearTimeout(audioTimer);audioTimer=null}if(currentFinish){const done=currentFinish;currentFinish=null;done()}}
 function primeSpeech(){if(!('speechSynthesis' in window))return;window.speechSynthesis.getVoices();}
 function getDictionaryAudio(text){
  const word=String(text).trim();if(!/^[a-z]+$/i.test(word))return Promise.resolve(null);
  const id=word.toLowerCase();if(audioPromises.has(id))return audioPromises.get(id);
- if(ISOLATED_PRONOUN_I.test(word)){
-  audioCache.set(id,FIXED_I_AUDIO);
-  const audio=new Audio();audio.preload='auto';audio.src=FIXED_I_AUDIO;audio.load();audioElements.set(id,audio);
-  audioPromises.set(id,Promise.resolve(FIXED_I_AUDIO));return audioPromises.get(id);
- }
  const promise=(async()=>{let timer;try{
   const ctl=new AbortController();timer=setTimeout(()=>ctl.abort(),2400);
   const res=await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(id),{signal:ctl.signal});
@@ -69,7 +60,7 @@ function prefetchQuestion(q){
 }
 function speakFallback(text,finish){
  if(!('speechSynthesis' in window)){finish();return}
- let u=new SpeechSynthesisUtterance(ISOLATED_PRONOUN_I.test(String(text).trim())?'eye':text);u.lang='en-US';u.rate=1;
+ let u=new SpeechSynthesisUtterance(text);u.lang='en-US';u.rate=1;
  let voices=speechSynthesis.getVoices();u.voice=voices.find(v=>v.lang.toLowerCase()==='en-us')||null;
  u.onend=finish;u.onerror=finish;speechSynthesis.speak(u);
  audioTimer=setTimeout(finish,12000);
@@ -264,17 +255,11 @@ function useSpellingHint(){
  q.hintUsed=true;q.hinted=[index];storeGame();renderGame();
 }
 async function playSpellingPrompt(q){
- if(!q||q.type!=='spell')return;
- const context=q.spellingPrompt?.context;
- if(!context){await playVoice(q.correct);return}
- const pieces=context.split('___');
- for(let i=0;i<pieces.length;i++){
-  if(game?.current!==q||q.stage!=='question')return;
-  const part=pieces[i].trim();
-  if(part)await playVoice(part,true);
-  if(i<pieces.length-1)await new Promise(resolve=>setTimeout(resolve,300));
- }
+ if(!q||q.type!=='spell'||q.stage!=='question')return;
+ // 題目文字仍保留空格，但朗讀時填入正確答案，讓孩子聽寫完整句子。
+ await playVoice(completedSpellingSentence(q));
 }
+
 function completedSpellingSentence(q){
  const ctx=q?.spellingPrompt?.context;
  return ctx?ctx.replace('___',q.correct):q.correct;
